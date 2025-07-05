@@ -1,14 +1,13 @@
 from setuptools import setup
 
 setup(
-	name="recsys",
+	name="hierarchical_hawkes",
 	version="0.1",
 	packages=[
-		"recsys",
+		"hierarchical_hawkes",
 	],
 	install_requires=[
 		"numpy",
 		"scipy",
-		"numba",
 	],
 )
