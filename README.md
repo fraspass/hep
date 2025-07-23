@@ -1,13 +1,16 @@
-# library_template
-Template for a python library
+# Hierarchical Hawkes functions
 
-This repository contains a template for a python library.
+This repository contains a _Python_ library supporting the paper *Heard, N.A., Lyzinski, V.P. and Sanna Passino, F. (2025) "Hierarchical Hawkes functions" (TBD)*, available as a preprint on [arXiv](https://arxiv.org/abs/2509.00000). 
 
-* `Notebooks` contains Jupyter notebooks with exporatory analyses and experiments,
-* `lib` contains a _python_ library with reusable bits of code (e.g. helper functions),
-* `data` can be used to store data. It is *not* managed under version control. 
-
-The _python_ library can be installed in edit mode as follows:
+The library `hierarchical_hawkes` can be installed in edit mode as follows:
 ```
-pip install -e lib/
+pip3 install -e lib/
 ```
+The library can then be imported in any _Python_ session:
+```python3
+import hierarchical_hakwes
+```
+
+## The library `hierarchical_hawkes` 
+
+A quick example on the type of functions that can be fitted using the library can be found in `notebooks/hierarchical_hawkes_delay.ipynb`.
