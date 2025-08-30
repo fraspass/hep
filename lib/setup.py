@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from setuptools import setup
 
 setup(
@@ -9,5 +10,6 @@ setup(
 	install_requires=[
 		"numpy",
 		"scipy",
+		"scikit-learn"
 	],
 )
