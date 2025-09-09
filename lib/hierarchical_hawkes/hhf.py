@@ -55,7 +55,7 @@ def negative_log_likelihood(params, time_series, jumps):
     ints = np.ones_like(time_grid) * lambda0
     # Calculate the intensity function
     for j, jump in enumerate(jumps):
-        ints += alphas[j] * np.clip(np.exp(-betas[j] * (time_grid - jump)), -100, 100) * np.heaviside(time_grid - jump, 1) ## Returns 1 if time_grid >= jump, else 0
+        ints += alphas[j] * np.exp(np.clip(-betas[j] * (time_grid - jump), -100, 100)) * np.heaviside(time_grid - jump, 1) ## Returns 1 if time_grid >= jump, else 0
     ## Loss function (negative log-likelihood / squared error loss)
     loss = np.sum((ints - time_series) ** 2)
     return loss

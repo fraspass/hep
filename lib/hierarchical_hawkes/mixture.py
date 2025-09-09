@@ -66,16 +66,18 @@ class HierarchicalHakwesMixtureEM:
             print(f'  - Delay in jumps: {self.delay}')
 
     ## Initialisation of parameters
-    def init_params(self, Y, init_method='kmeans', offset=1e-12):
+    def init_params(self, Y, init_method='kmeans', offset=1e-12, random_state=None):
         n, T = Y.shape
         K = self.K
         if init_method == 'kmeans':
             # Cluster raw series
-            kmeans = KMeans(n_clusters=K).fit(Y)
+            kmeans = KMeans(n_clusters=K, random_state=random_state).fit(Y)
             labels = kmeans.labels_
             r = 0.5 / (K - 1) * np.ones((n, K))
             r[np.arange(n), labels] = 0.5
         else:
+            if random_state is not None:
+                np.random.seed(random_state)
             # Random soft assignments from Dirichlet distribution
             r = np.random.dirichlet(np.ones(K), size=n)
         # Initialise pi
@@ -101,6 +103,8 @@ class HierarchicalHakwesMixtureEM:
                     alphas0 = np.sort(np.diff(cluster_means[k]))[::-1][:len(self.jumps_alpha)]
                 theta0_alpha0 = alphas0[0]
                 eta_alpha0 = np.abs(alphas0[1] - alphas0[0])
+                if eta_alpha0 == 0:
+                    eta_alpha0 = 0.1
                 csi_alpha0 = 0.1  # Initial guess for csi
                 params = np.log([theta0_alpha0, eta_alpha0, csi_alpha0])
                 res_alpha = minimize(inhibitory_loss, params, args=(alphas0, self.jumps_alpha), method='L-BFGS-B')
@@ -118,6 +122,8 @@ class HierarchicalHakwesMixtureEM:
                     alphas0 = np.sort(np.diff(cluster_means[k]))[::-1][:len(self.jumps)]
                 theta0_alpha0 = alphas0[0]
                 eta_alpha0 = np.abs(alphas0[1] - alphas0[0])
+                if eta_alpha0 == 0:
+                    eta_alpha0 = 0.1
                 csi_alpha0 = 0.1  # Initial guess for csi
                 params = np.log([theta0_alpha0, eta_alpha0, csi_alpha0])
                 res_alpha = minimize(inhibitory_loss, params, args=(alphas0, self.jumps), method='L-BFGS-B')
@@ -146,7 +152,7 @@ class HierarchicalHakwesMixtureEM:
         return resp, lse.sum()  # responsibilities and log-likelihood contribution
 
     # Fit the mixture model
-    def fit(self, Y, init_method='kmeans', offset=1e-12):
+    def fit(self, Y, init_method='kmeans', offset=1e-12, random_state=None):
         """
         Fit the mixture.
         Y           : (n, T) data matrix
@@ -156,7 +162,7 @@ class HierarchicalHakwesMixtureEM:
         Y = np.asarray(Y)
         n, T = Y.shape
         # Initialise parameters
-        resp = self.init_params(Y, init_method=init_method)
+        resp = self.init_params(Y, init_method=init_method, offset=offset, random_state=random_state)
         # Initialise previous value of likelihood
         prev_ll = -np.inf
         for it in range(self.max_iter):
@@ -183,7 +189,9 @@ class HierarchicalHakwesMixtureEM:
                             ## Select the maximum differences observed
                             alphas0 = np.sort(np.diff(mu_prev))[::-1][:len(self.jumps_alpha)]
                         theta0_alpha0 = alphas0[0]
-                        eta_alpha0 = np.abs(alphas0[1] - alphas0[0])
+                        eta_alpha0 = np.abs(alphas0[1] - alphas0[0]) # Ensure positive
+                        if eta_alpha0 == 0:
+                            eta_alpha0 = 0.1
                         csi_alpha0 = 0.1  # Initial guess for csi
                         params = np.log([theta0_alpha0, eta_alpha0, csi_alpha0])
                         res_alpha = minimize(inhibitory_loss, params, args=(alphas0, self.jumps_alpha), method='L-BFGS-B')
@@ -201,6 +209,8 @@ class HierarchicalHakwesMixtureEM:
                             alphas0 = np.sort(np.diff(mu_prev))[::-1][:len(self.jumps)]
                         theta0_alpha0 = alphas0[0]
                         eta_alpha0 = np.abs(alphas0[1] - alphas0[0])
+                        if eta_alpha0 == 0:
+                            eta_alpha0 = 0.1
                         csi_alpha0 = 0.1  # Initial guess for csi
                         params = np.log([theta0_alpha0, eta_alpha0, csi_alpha0])
                         res_alpha = minimize(inhibitory_loss, params, args=(alphas0, self.jumps), method='L-BFGS-B')
@@ -227,5 +237,7 @@ class HierarchicalHakwesMixtureEM:
             if np.abs(ll - prev_ll) < self.tol * max(1.0, np.abs(prev_ll)):
                 break
             prev_ll = ll
-        print()
-        print(f"Final log-likelihood: {ll:.6f}")
+        self.loglik_trace.append(ll)
+        if self.verbose:
+            print()
+            print(f"Final log-likelihood: {ll:.6f}")
