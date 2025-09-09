@@ -2,3 +2,4 @@ lib/hierarchical_hawkes/__pycache__/*
 /data/*
 .DS_Store
 */.DS_Store
+figures/hhf_nicks_groups_*
