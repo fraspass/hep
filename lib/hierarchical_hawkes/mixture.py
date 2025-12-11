@@ -15,8 +15,10 @@ class HierarchicalHakwesMixture:
     Model: Event sequence i | z_i=k ~ HierarchicalHawkes(lambda_k(t; theta_k))    
     Requires: fit_fn (function to fit parameters theta_k from weighted observations)
     """
-    def __init__(self, K, fit_fn=None, predict_fn=None, jumps=None, jumps_alpha=None, 
-                    delay=False, max_iter=200, tol=1e-6, verbose=True):
+    def __init__(self, K, fit_fn=None, jumps=None, jumps_alpha=None, 
+                    add_delay=False, fixed_jumps=False, fixed_decay=False, fixed_delay=False, 
+                    inhibitory_decay=False, inhibitory_delay=False,
+                    max_iter=200, tol=1e-6, verbose=True):
         """
         Parameters:
         -----------
@@ -34,9 +36,9 @@ class HierarchicalHakwesMixture:
             raise ValueError("K must be an integer.")
         self.K = int(K)
         # Check if delay is a boolean
-        if not isinstance(delay, bool):
+        if not isinstance(add_delay, bool):
             raise ValueError("Delay must be a boolean (True/False).")
-        self.delay = delay
+        self.delay = add_delay
         # Check if jumps is a numpy array or list
         if jumps is not None and not (isinstance(jumps, np.ndarray) or isinstance(jumps, list)):
             raise ValueError("Jumps must be a numpy array or list.")
@@ -186,8 +188,10 @@ class HierarchicalHakwesMixture:
                     theta0_beta, eta_beta, xi_beta
                 ])
             # Fit initial parameters
-            theta = self.fit_fn(event_times=event_times, jumps=self.jumps, T=self.T, weights=r[:, k], observation_intervals=self.obs_intervals, sum_values=False, init=params).x
-            self.theta.append(theta)
+            ## theta = self.fit_fn(event_times=event_times, jumps=self.jumps, T=self.T, weights=r[:, k], 
+            ##                     observation_intervals=self.obs_intervals, sum_values=False, init=params).x
+            ## self.theta.append(theta)
+            self.theta.append(params)  # Use initial params directly without fitting
 
     ## Set or calculate the maximum observation time T
     def calculate_T(self, event_times, T=None):
@@ -196,11 +200,11 @@ class HierarchicalHakwesMixture:
             raise ValueError("T has already been set. To recalculate T, please create a new instance of the class.")
         if T is None:
             # Determine T from the maximum event time across all sequences
-            T = int(np.ceil(max([max(times) if len(times) > 0 else 0 for times in event_times]))) + 1.0
+            T = int(np.ceil(max([max(event_times[node]) if len(event_times[node]) > 0 else 0 for node in event_times])))
         else:
             # Check if T is a float or integer, larger than all event times
-            max_event = max([max(times) if len(times) > 0 else 0 for times in event_times])
-            if not isinstance(T, (int, float)) or not T <= 0 or T <= max_event:
+            max_event = max([max(event_times[node]) if len(event_times[node]) > 0 else 0 for node in event_times])
+            if not isinstance(T, (int, float)) or not T > 0 or T <= max_event:
                 raise ValueError("T must be a positive number, greater than all event times.")
         self.T = T
         return T
@@ -260,12 +264,12 @@ class HierarchicalHakwesMixture:
         else:
             if T is None:
                 # Determine T from the maximum event time across all sequences
-                T = int(np.ceil(max([max(times) if len(times) > 0 else 0 for times in event_times]))) + 1.0
+                T = int(np.ceil(max([max(event_times[node]) if len(event_times[node]) > 0 else 0 for node in event_times])))
                 self.T = T
             else:
                 # Check if T is a float or integer, larger than all event times
-                max_event = max([max(times) if len(times) > 0 else 0 for times in event_times])
-                if not isinstance(T, (int, float)) or not T <= 0 or T <= max_event:
+                max_event = max([max(event_times[node]) if len(event_times[node]) > 0 else 0 for node in event_times])
+                if not isinstance(T, (int, float)) or not T > 0 or T <= max_event:
                     raise ValueError("T must be a positive number, greater than all event times.")
                 self.T = T
         ## Check if self.observation_intervals is set

@@ -5,7 +5,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 ## Inhibitory Hawkes intensity function for the model hyperparameters
-def inhibitory_hawkes_intensity(times, jumps, theta0, eta, xi):
+def inhibitory_hawkes_intensity(times, jumps, theta0, eta, xi, inhibitory=True):
     ## Check parameter values
     if not (theta0 >= 0 and eta >= 0 and xi >= 0):
         raise ValueError("Parameters theta0, eta, and xi must be non-negative.")
@@ -24,49 +24,122 @@ def inhibitory_hawkes_intensity(times, jumps, theta0, eta, xi):
     ## Update the intensity at each jump 
     for jump in jumps:
         subset_times = (times > jump)
-        intensity[subset_times] -= eta * np.exp(-xi * (times[subset_times] - jump))
+        if inhibitory:
+            intensity[subset_times] -= eta * np.exp(-xi * (times[subset_times] - jump))
+        else:
+            intensity[subset_times] += eta * np.exp(-xi * (times[subset_times] - jump))
     ## Ensure intensity does not drop below zero
     intensity = np.maximum(intensity, 0)
     ## Return the computed intensity
     return intensity
 
-## Construct fit_fn and predict_fn to pass to TimeSeriesMixtureEM in mixture.py
-def fit_process(y, w, jumps, init):
+## Construct fit_fn
+def fit_process(init, event_times, jumps, T, weights=None, observation_intervals=None, sum_values=False,
+                add_delay=False, fixed_jumps=False, fixed_decay=False, fixed_delay=False, inhibitory_decay=True, inhibitory_delay=True):
     # Minimize the loss function
-    result = minimize(nll, init, args=(y, jumps, w), method='L-BFGS-B')
+    result = minimize(nll, init, args=(event_times, jumps, T, weights, observation_intervals, sum_values,
+                                       add_delay, fixed_jumps, fixed_decay, fixed_delay, inhibitory_decay, inhibitory_delay), method='L-BFGS-B')
     return result
 
 ## Function to calculate the intensity given parameters, jumps, evaluation points
-def calculate_intensity(params, t, jumps):
-    # Check length of the parameter vector
-    if len(params) != 7 and len(params) != 10:
-        raise ValueError("Expected 7 or 10 parameters, got {}".format(len(params)))
+def calculate_intensity(params, t, jumps, add_delay=False, fixed_jumps=False, fixed_decay=False, fixed_delay=False, inhibitory_decay=True, inhibitory_delay=True, log_params=False):
+    ## Check add_delay, fixed_jumps, fixed_decay, fixed_delay as booleans
+    if not isinstance(add_delay, bool):
+        raise TypeError("add_delay must be a boolean value.")
+    if not isinstance(fixed_jumps, bool):
+        raise TypeError("fixed_jumps must be a boolean value.")
+    if not isinstance(fixed_decay, bool):
+        raise TypeError("fixed_decay must be a boolean value.")
+    if not isinstance(fixed_delay, bool):
+        raise TypeError("fixed_delay must be a boolean value.")
+    if not isinstance(inhibitory_decay, bool):
+        raise TypeError("inhibitory_decay must be a boolean value.")
+    if not isinstance(inhibitory_delay, bool):
+        raise TypeError("inhibitory_delay must be a boolean value.")
+    if not isinstance(log_params, bool):
+        raise TypeError("log_params must be a boolean value.")
+    if not add_delay and fixed_delay:
+        raise ValueError("fixed_delay can only be True if add_delay is True.")
+    ## Calculate number of model parameters according to setup
+    n_params = 3
+    if not fixed_jumps:
+        n_params += 2
+    if not fixed_decay:
+        n_params += 2
+    if add_delay:
+        n_params += 1
+        if not fixed_delay:
+            n_params += 2
+    # Check length of the parameter vector      
+    if len(params) != n_params:
+        raise ValueError("Expected {} parameters, got {}".format(n_params, len(params)))
     ## Model parameters are only obtained after exponentiation
-    params = np.clip(params, -100, 100)
-    if len(params) == 7:
-        lambda0, theta0_alpha, eta_alpha, csi_alpha, theta0_beta, eta_beta, csi_beta = np.exp(params)
+    params = np.exp(np.clip(params, -100, 100)) if log_params else params
+    jumps = np.array(jumps)
+    ## Unpack parameters
+    lambda0 = params[0]
+    theta0_alpha = params[1]
+    if not fixed_jumps:
+        eta_alpha = params[2]
+        csi_alpha = params[3]
+        theta0_beta = params[4]
+        if not fixed_decay:
+            eta_beta = params[5]
+            csi_beta = params[6]
+            if add_delay:
+                theta0_delta = params[7]
+                if not fixed_delay:
+                    eta_delta = params[8]
+                    csi_delta = params[9]
+        else:
+            if add_delay:
+                theta0_delta = params[5]
+                if not fixed_delay:
+                    eta_delta = params[6]
+                    csi_delta = params[7]
     else:
-        lambda0, theta0_alpha, eta_alpha, csi_alpha, theta0_beta, eta_beta, csi_beta, theta0_delta, eta_delta, csi_delta = np.exp(params)
+        theta0_beta = params[2]
+        if not fixed_decay:
+            eta_beta = params[3]
+            csi_beta = params[4]
+            if add_delay:
+                theta0_delta = params[5]
+                if not fixed_delay:
+                    eta_delta = params[6]
+                    csi_delta = params[7]
+        else:
+            if add_delay:
+                theta0_delta = params[3]
+                if not fixed_delay:
+                    eta_delta = params[4]
+                    csi_delta = params[5]
     ## Calculate the model parameters hierarchically
-    alphas = inhibitory_hawkes_intensity(jumps, jumps, theta0_alpha, eta_alpha, csi_alpha)
-    betas = inhibitory_hawkes_intensity(jumps, jumps, theta0_beta, eta_beta, csi_beta)
-    if len(params) == 10:
-        deltas = inhibitory_hawkes_intensity(jumps, jumps, theta0_delta, eta_delta, csi_delta)
+    if fixed_jumps:
+        alphas = theta0_alpha * np.ones(len(jumps))
+    else:
+        alphas = inhibitory_hawkes_intensity(jumps, jumps, theta0_alpha, eta_alpha, csi_alpha)
+    if fixed_decay:
+        betas = theta0_beta * np.ones(len(jumps))
+    else:
+        betas = inhibitory_hawkes_intensity(jumps, jumps, theta0_beta, eta_beta, csi_beta, inhibitory=inhibitory_decay)
+    if add_delay and not fixed_delay:
+        deltas = inhibitory_hawkes_intensity(jumps, jumps, theta0_delta, eta_delta, csi_delta, inhibitory=inhibitory_delay)
     ## Calculate the intensity function
     ints = np.ones_like(t) * lambda0
-    if len(params) == 10:
+    if add_delay:
         for j, jump in enumerate(jumps):
-            c1 = alphas[j] / (deltas[j] + 1e-12) * np.clip(t - jump, 0, deltas[j]) * (1 - np.heaviside(t - jump - deltas[j], 1))
-            c2 = np.heaviside(t - jump - deltas[j], 1) * alphas[j] * np.exp(np.clip(-betas[j] * (t - jump - deltas[j]), -100, 100))
-            ints += (c1 + c2) * np.heaviside(t - jump, 1) ## Returns 1 if time_grid >= jump, else 0
+            c1 = alphas[j] / (deltas[j] + 1e-12) * np.clip(t - jump, 0, deltas[j]) * (1 - np.heaviside(t - jump - deltas[j], 0))
+            c2 = np.heaviside(t - jump - deltas[j], 0) * alphas[j] * np.exp(np.clip(-betas[j] * (t - jump - deltas[j]), -100, 100))
+            ints += (c1 + c2) * np.heaviside(t - jump, 0) ## Returns 1 if time_grid >= jump, else 0
     else:
         for j, jump in enumerate(jumps):
-            ints += alphas[j] * np.exp(np.clip(-betas[j] * (t - jump), -100, 100)) * np.heaviside(t - jump, 1) ## Returns 1 if time_grid >= jump, else 0
+            ints += alphas[j] * np.exp(np.clip(-betas[j] * (t - jump), -100, 100)) * np.heaviside(t - jump, 0) ## Returns 1 if time_grid >= jump, else 0
     ## Return the intensity function
     return ints
 
 ## Maximum likelihood estimation of the parameters of the entire process
-def nll(params, event_times, jumps, T, weights=None, observation_intervals=None, sum_values=False):
+def nll(params, event_times, jumps, T, weights=None, observation_intervals=None, sum_values=False, 
+        add_delay=False, fixed_jumps=False, fixed_decay=False, fixed_delay=False, inhibitory_decay=True, inhibitory_delay=True):
     ## Check parameter values
     if not isinstance(params, (list, np.ndarray)):
         raise TypeError("Parameters must be a list or numpy array.")
@@ -78,19 +151,47 @@ def nll(params, event_times, jumps, T, weights=None, observation_intervals=None,
         if isinstance(event_times, dict):
             weights = np.ones(len(event_times))
     else:
-        if isinstance(weights, (list, np.ndarray)):
+        if not isinstance(event_times, dict):
             raise ValueError("Weights cannot be provided if event_times is not a dictionary.")
-        else:    
+        else:
+            if not isinstance(weights, (list, np.ndarray)):
+                raise TypeError("Weights must be a list or numpy array.")
             if len(weights) != len(event_times):
                 raise ValueError("Weights must be of the same length as event_times.")
+            weights = np.array(weights)
     ## Check sum_values as boolean
     if not isinstance(sum_values, bool):
         raise TypeError("sum_values must be a boolean value.")
     if sum_values and not isinstance(event_times, dict):
         raise ValueError("sum_values can only be True if event_times is a dictionary.")
-    ## Check length of the parameter vector
-    if len(params) != 7 and len(params) != 10:
-        raise ValueError("Expected 7 or 10 parameters, got {}".format(len(params)))
+    ## Check all boolean flags
+    if not isinstance(add_delay, bool):
+        raise TypeError("add_delay must be a boolean value.")
+    if not isinstance(fixed_jumps, bool):
+        raise TypeError("fixed_jumps must be a boolean value.")
+    if not isinstance(fixed_decay, bool):
+        raise TypeError("fixed_decay must be a boolean value.")
+    if not isinstance(fixed_delay, bool):
+        raise TypeError("fixed_delay must be a boolean value.")
+    if not isinstance(inhibitory_decay, bool):
+        raise TypeError("inhibitory_decay must be a boolean value.")
+    if not isinstance(inhibitory_delay, bool):
+        raise TypeError("inhibitory_delay must be a boolean value.")
+    if not add_delay and fixed_delay:
+        raise ValueError("fixed_delay can only be True if add_delay is True.")
+    ## Check length of the parameter vector according to setup
+    n_params = 3
+    if not fixed_jumps:
+        n_params += 2
+    if not fixed_decay:
+        n_params += 2
+    if add_delay:
+        n_params += 1
+        if not fixed_delay:
+            n_params += 2
+    if len(params) != n_params:
+        raise ValueError("Expected {} parameters, got {}".format(n_params, len(params)))
+    ## Check observation_intervals
     if observation_intervals is not None:
         if not isinstance(observation_intervals, (list, np.ndarray)):
             raise TypeError("Observation intervals must be a list or numpy array.")
@@ -98,47 +199,92 @@ def nll(params, event_times, jumps, T, weights=None, observation_intervals=None,
         if observation_intervals.ndim != 2 or observation_intervals.shape[1] != 2:
             raise ValueError("Observation intervals must be a 2D array with shape (R, 2).")
     ## Convert inputs to numpy arrays to avoid type conflicts
-    params = np.clip(params, -100, 100)
+    params = np.exp(np.clip(params, -100, 100))
     n = len(event_times)
     jumps = np.array(jumps)
+    ## Unpack parameters
+    lambda0 = params[0]
+    theta0_alpha = params[1]
+    if not fixed_jumps: 
+        eta_alpha = params[2]
+        csi_alpha = params[3]
+        theta0_beta = params[4]
+        if not fixed_decay:
+            eta_beta = params[5]
+            csi_beta = params[6]
+            if add_delay:
+                theta0_delta = params[7]
+                if not fixed_delay:
+                    eta_delta = params[8]
+                    csi_delta = params[9]
+        else:
+            if add_delay:
+                theta0_delta = params[5]
+                if not fixed_delay:
+                    eta_delta = params[6]
+                    csi_delta = params[7]
+    else:
+        theta0_beta = params[2]
+        if not fixed_decay:
+            eta_beta = params[3]
+            csi_beta = params[4]
+            if add_delay:
+                theta0_delta = params[5]
+                if not fixed_delay:
+                    eta_delta = params[6]
+                    csi_delta = params[7]
+        else:
+            if add_delay:
+                theta0_delta = params[3]
+                if not fixed_delay:
+                    eta_delta = params[4]
+                    csi_delta = params[5]
     ## Obtain intensities for event times
     if isinstance(event_times, dict):
         lik1 = {}
         for i in range(n):
-            lik1[i] = calculate_intensity(params, event_times[i], jumps)
+            lik1[i] = calculate_intensity(params=params, t=event_times[i], jumps=jumps, add_delay=add_delay, 
+                                          fixed_jumps=fixed_jumps, fixed_decay=fixed_decay, fixed_delay=fixed_delay, 
+                                          inhibitory_decay=inhibitory_decay, inhibitory_delay=inhibitory_delay, log_params=False)
     else:
-        lik1 = calculate_intensity(params, event_times, jumps)
-    ## Calculate integral of intensity function
-    if len(params) == 7:
-        ## Unpack parameters for 7-parameter model (scaled exponential)
-        lambda0, theta0_alpha, eta_alpha, csi_alpha, theta0_beta, eta_beta, csi_beta = np.exp(params)
-        ## Calculate hierarchical parameters
+        lik1 = calculate_intensity(params=params, t=event_times, jumps=jumps, add_delay=add_delay, 
+                                  fixed_jumps=fixed_jumps, fixed_decay=fixed_decay, fixed_delay=fixed_delay, 
+                                  inhibitory_decay=inhibitory_decay, inhibitory_delay=inhibitory_delay, log_params=False)
+    ## Obtain parameters
+    if fixed_jumps:
+        alphas = theta0_alpha * np.ones(len(jumps))
+    else:
         alphas = inhibitory_hawkes_intensity(jumps, jumps, theta0_alpha, eta_alpha, csi_alpha)
-        betas = inhibitory_hawkes_intensity(jumps, jumps, theta0_beta, eta_beta, csi_beta)
-        ## Calculate integral for each jump (Equation 2 from the paper)
-        integral = 0.0
-        for j, jump in enumerate(jumps):
-            if T > jump:
+    if fixed_decay:
+        betas = theta0_beta * np.ones(len(jumps))
+    else:
+        betas = inhibitory_hawkes_intensity(jumps, jumps, theta0_beta, eta_beta, csi_beta, inhibitory=inhibitory_decay)
+    if add_delay:
+        if fixed_delay:
+            deltas = theta0_delta * np.ones(len(jumps))
+        else:
+            deltas = inhibitory_hawkes_intensity(jumps, jumps, theta0_delta, eta_delta, csi_delta, inhibitory=inhibitory_delay)
+    ## Calculate integral of the intensity function over [0, T]
+    if observation_intervals is None:
+        ## Calculate integral of intensity function
+        if not add_delay:
+            ## Calculate integral for each jump
+            integral = 0.0
+            for j, jump in enumerate(jumps):
                 # I_j = alpha(tau_j) * beta(tau_j)^{-1} * [1 - exp(-beta(tau_j) * (T - tau_j))]
                 integral += alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (T - jump), -100, 100)))
-    else:
-        ## Unpack parameters for 10-parameter model (delayed scaled exponential)
-        lambda0, theta0_alpha, eta_alpha, csi_alpha, theta0_beta, eta_beta, csi_beta, theta0_delta, eta_delta, csi_delta = np.exp(params)
-        ## Calculate hierarchical parameters
-        alphas = inhibitory_hawkes_intensity(jumps, jumps, theta0_alpha, eta_alpha, csi_alpha)
-        betas = inhibitory_hawkes_intensity(jumps, jumps, theta0_beta, eta_beta, csi_beta)
-        deltas = inhibitory_hawkes_intensity(jumps, jumps, theta0_delta, eta_delta, csi_delta)
-        ## Calculate integral for each jump (Equation 3 from the paper)
-        integral = 0.0
-        for j, jump in enumerate(jumps):
-            if T > jump:
-                time_diff = T - jump
-                if time_diff <= deltas[j]:
-                    # I_j = alpha(tau_j) / (2 * delta(tau_j)) * (T - tau_j)^2
-                    integral += alphas[j] / (2 * deltas[j] + 1e-12) * (time_diff ** 2)
-                else:
-                    # I_j = alpha(tau_j) * delta(tau_j) / 2 + alpha(tau_j) / beta(tau_j) * [1 - exp(-beta(tau_j) * (T - tau_j - delta(tau_j)))]
-                    integral += alphas[j] * deltas[j] / 2 + alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (time_diff - deltas[j]), -100, 100)))
+        else:
+            ## Calculate integral for each jump
+            integral = 0.0
+            for j, jump in enumerate(jumps):
+                if T > jump:
+                    time_diff = T - jump
+                    if time_diff <= deltas[j]:
+                        # I_j = alpha(tau_j) / (2 * delta(tau_j)) * (T - tau_j)^2
+                        integral += alphas[j] / (2 * deltas[j] + 1e-12) * (time_diff ** 2)
+                    else:
+                        # I_j = alpha(tau_j) * delta(tau_j) / 2 + alpha(tau_j) / beta(tau_j) * [1 - exp(-beta(tau_j) * (T - tau_j - delta(tau_j)))]
+                        integral += alphas[j] * deltas[j] / 2 + alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (time_diff - deltas[j]), -100, 100)))
     ## Subtract integrals over censored (blank) periods if observation intervals are provided
     if observation_intervals is not None:
         censored_integral = 0.0
@@ -147,7 +293,7 @@ def nll(params, event_times, jumps, T, weights=None, observation_intervals=None,
             # Calculate integral over [a_r, b_r] for the baseline
             censored_integral += lambda0 * (b_r - a_r)
             # Calculate integral for each jump's contribution
-            if len(params) == 7:
+            if not add_delay:
                 for j, jump in enumerate(jumps):
                     if b_r > jump:
                         # Contribution to [a_r, b_r]
