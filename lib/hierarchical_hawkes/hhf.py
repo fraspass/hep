@@ -122,8 +122,11 @@ def calculate_intensity(params, t, jumps, add_delay=False, fixed_jumps=False, fi
         betas = theta0_beta * np.ones(len(jumps))
     else:
         betas = inhibitory_hawkes_intensity(jumps, jumps, theta0_beta, eta_beta, csi_beta, inhibitory=inhibitory_decay)
-    if add_delay and not fixed_delay:
-        deltas = inhibitory_hawkes_intensity(jumps, jumps, theta0_delta, eta_delta, csi_delta, inhibitory=inhibitory_delay)
+    if add_delay: 
+        if not fixed_delay:
+            deltas = inhibitory_hawkes_intensity(jumps, jumps, theta0_delta, eta_delta, csi_delta, inhibitory=inhibitory_delay)
+        else:
+            deltas = theta0_delta * np.ones(len(jumps))
     ## Calculate the intensity function
     ints = np.ones_like(t) * lambda0
     if add_delay:
@@ -266,42 +269,50 @@ def nll(params, event_times, jumps, T, weights=None, observation_intervals=None,
             deltas = inhibitory_hawkes_intensity(jumps, jumps, theta0_delta, eta_delta, csi_delta, inhibitory=inhibitory_delay)
     ## Calculate integral of the intensity function over [0, T]
     if observation_intervals is None:
+        integral = lambda0 * T
         ## Calculate integral of intensity function
         if not add_delay:
             ## Calculate integral for each jump
-            integral = 0.0
             for j, jump in enumerate(jumps):
                 # I_j = alpha(tau_j) * beta(tau_j)^{-1} * [1 - exp(-beta(tau_j) * (T - tau_j))]
-                integral += alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (T - jump), -100, 100)))
+                if betas[j] < 1e-10:
+                    integral += alphas[j] * (T - jump)
+                else:
+                    integral += alphas[j] / betas[j] * (1 - np.exp(-betas[j] * (T - jump)))
         else:
             ## Calculate integral for each jump
-            integral = 0.0
             for j, jump in enumerate(jumps):
                 if T > jump:
                     time_diff = T - jump
                     if time_diff <= deltas[j]:
                         # I_j = alpha(tau_j) / (2 * delta(tau_j)) * (T - tau_j)^2
-                        integral += alphas[j] / (2 * deltas[j] + 1e-12) * (time_diff ** 2)
+                        integral += alphas[j] / (2 * deltas[j]) * (time_diff ** 2)
                     else:
                         # I_j = alpha(tau_j) * delta(tau_j) / 2 + alpha(tau_j) / beta(tau_j) * [1 - exp(-beta(tau_j) * (T - tau_j - delta(tau_j)))]
-                        integral += alphas[j] * deltas[j] / 2 + alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (time_diff - deltas[j]), -100, 100)))
-    ## Subtract integrals over censored (blank) periods if observation intervals are provided
-    if observation_intervals is not None:
-        censored_integral = 0.0
+                        if betas[j] < 1e-10:
+                            integral += alphas[j] * deltas[j] / 2 + alphas[j] * (time_diff - deltas[j])
+                        else:
+                            integral += alphas[j] * deltas[j] / 2 + alphas[j] / betas[j] * (1 - np.exp(-betas[j] * (time_diff - deltas[j])))
+    else:
+        # Adjust the total integral: instead of [0, T], we only integrate over observation intervals
+        integral = 0.0
         for r in range(len(observation_intervals)):
             a_r, b_r = observation_intervals[r]
             # Calculate integral over [a_r, b_r] for the baseline
-            censored_integral += lambda0 * (b_r - a_r)
+            integral += lambda0 * (b_r - a_r)
             # Calculate integral for each jump's contribution
             if not add_delay:
                 for j, jump in enumerate(jumps):
                     if b_r > jump:
                         # Contribution to [a_r, b_r]
-                        # Upper limit contribution
-                        upper = alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (b_r - jump), -100, 100))) if b_r > jump else 0.0
-                        # Lower limit contribution
-                        lower = alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (a_r - jump), -100, 100))) if a_r > jump else 0.0
-                        censored_integral += upper - lower
+                        # Upper and lower limit contribution
+                        if betas[j] < 1e-10:
+                            upper = alphas[j] * (b_r - jump) if b_r > jump else 0.0
+                            lower = alphas[j] * (a_r - jump) if a_r > jump else 0.0
+                        else:
+                            upper = alphas[j] / betas[j] * (1 - np.exp(-betas[j] * (b_r - jump))) if b_r > jump else 0.0
+                            lower = alphas[j] / betas[j] * (1 - np.exp(-betas[j] * (a_r - jump))) if a_r > jump else 0.0
+                        integral += upper - lower
             else:
                 for j, jump in enumerate(jumps):
                     if b_r > jump:
@@ -311,21 +322,19 @@ def nll(params, event_times, jumps, T, weights=None, observation_intervals=None,
                         else:
                             time_diff_upper = b_r - jump
                             if time_diff_upper <= deltas[j]:
-                                upper = alphas[j] / (2 * deltas[j] + 1e-12) * (time_diff_upper ** 2)
+                                upper = alphas[j] / (2 * deltas[j]) * (time_diff_upper ** 2)
                             else:
-                                upper = alphas[j] * deltas[j] / 2 + alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (time_diff_upper - deltas[j]), -100, 100)))
+                                upper = alphas[j] * deltas[j] / 2 + alphas[j] / (betas[j]) * (1 - np.exp(-betas[j] * (time_diff_upper - deltas[j])))
                         # Contribution to [a_r, b_r] - lower limit
                         if a_r <= jump:
                             lower = 0.0
                         else:
                             time_diff_lower = a_r - jump
                             if time_diff_lower <= deltas[j]:
-                                lower = alphas[j] / (2 * deltas[j] + 1e-12) * (time_diff_lower ** 2)
+                                lower = alphas[j] / (2 * deltas[j]) * (time_diff_lower ** 2)
                             else:
-                                lower = alphas[j] * deltas[j] / 2 + alphas[j] / (betas[j] + 1e-12) * (1 - np.exp(np.clip(-betas[j] * (time_diff_lower - deltas[j]), -100, 100)))                        
-                        censored_integral += upper - lower
-        # Adjust the total integral: instead of [0, T], we only integrate over observation intervals
-        integral = censored_integral
+                                lower = alphas[j] * deltas[j] / 2 + alphas[j] / (betas[j]) * (1 - np.exp(-betas[j] * (time_diff_lower - deltas[j])))                        
+                        integral += upper - lower
     ## Calculate negative log-likelihood
     if isinstance(event_times, dict):
         # For multiple sequences (mixture model)
@@ -335,12 +344,12 @@ def nll(params, event_times, jumps, T, weights=None, observation_intervals=None,
             log_sum = np.sum(np.log(lik1[i] + 1e-12))
             # Weighted negative log-likelihood
             if sum_values:
-                nll_val -= weights[i] * (log_sum - integral - lambda0 * T)
+                nll_val -= weights[i] * (log_sum - integral)
             else:
-                nll_val[i] -= weights[i] * (log_sum - integral - lambda0 * T)
+                nll_val[i] -= weights[i] * (log_sum - integral)
     else:
         # For single sequence
         log_sum = np.sum(np.log(lik1 + 1e-12))
-        nll_val = -log_sum + lambda0 * T + integral
+        nll_val = -log_sum + integral
     # Return the (weighted) negative log-likelihood value
     return nll_val
