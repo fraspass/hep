@@ -3,9 +3,8 @@
 import numpy as np
 from scipy.special import logsumexp
 from sklearn.cluster import KMeans
-from scipy.optimize import minimize
 ## Import functions from file hhf.py
-from .hhf import calculate_intensity, nll, fit_process
+from .hhp import nll, fit_process
 
 class HierarchicalHakwesMixture:
     """

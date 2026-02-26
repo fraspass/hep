@@ -1,2 +1,2 @@
-from .hhf import *
+from .hhp import *
 from .mixture import *
