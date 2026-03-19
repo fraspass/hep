@@ -2,10 +2,10 @@
 from setuptools import setup
 
 setup(
-	name="hierarchical_hawkes",
+	name="hep",
 	version="0.1",
 	packages=[
-		"hierarchical_hawkes",
+		"hep",
 	],
 	install_requires=[
 		"numpy",
