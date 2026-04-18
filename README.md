@@ -1,4 +1,4 @@
-# Hierarchical Hawkes functions
+# Hierarchical Excitatory Processes (HEPs)
 
 This repository contains a _Python_ library supporting the paper *Sanna Passino, F., Heard, N. A., Brown, J. W., Frost, W. N., and Lyzinski, V. P. (2026), "Hierarchical excitatory processes for modelling event-time data in the presence of exogenous stimuli"*, available as a preprint on [arXiv](https://arxiv.org/abs/2605.00000). 
 
