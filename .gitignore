@@ -5,3 +5,12 @@ lib/hierarchical_hawkes/__pycache__/*
 figures/hhf_nicks_groups_*
 notebooks/Lyzinski_Initial_Data/*
 lib/hep/__pycache__/
+*.txt
+data
+notebooks/*.npy
+figures/Dec0922/
+figures/Jun0425/
+figures/Jun0523/*.pdf
+figures/Sep1223/
+figures/degree_*
+figures/preliminary_results/
